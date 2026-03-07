@@ -5,6 +5,14 @@ const { exec } = require('child_process');
 const path = require('path');
 const { initDB, getSentences, getStats } = require('./db');
 
+console.log('ALL ENV VARS:', Object.keys(process.env));
+console.log('DATABASE_URL:', process.env.DATABASE_URL);
+
+console.log('ENV CHECK:', {
+  hasDB: !!process.env.DATABASE_URL,
+  dbStart: process.env.DATABASE_URL ? process.env.DATABASE_URL.substring(0, 15) : 'MISSING'
+});
+
 const app = express();
 app.use(cors());
 
