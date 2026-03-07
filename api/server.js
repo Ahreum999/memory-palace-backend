@@ -1,3 +1,4 @@
+
 const express = require('express');
 const cors = require('cors');
 const fs = require('fs');
@@ -80,9 +81,11 @@ exec(`python3 ${scraperPath}`, (error, stdout, stderr) => {
     console.log(`Scraper output:\n${stdout}`);
   });
 }
+app.get('/', (req, res) => res.json({ status: 'ok' }));
+app.get('/health', (req, res) => res.json({ status: 'ok' }));
 
 // Run scraper immediately when server starts
-runScraper();
+setTimeout(runScraper, 5000);
 
 // Then run every hour at minute 0
 // Format: minute hour day month weekday
