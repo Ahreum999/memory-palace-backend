@@ -42,7 +42,11 @@ MAX = {
 }
 
 BLOCKLIST_FILE = os.path.join(DATA_DIR, "blocklist.txt")
-TUMBLR_TAGS = ["mother", "mama", "mommy", "my-mother", "my-mom"]
+TUMBLR_TAGS = [
+    "https://www.tumblr.com/tagged/mother/rss",
+    "https://www.tumblr.com/tagged/mama/rss",
+    "https://www.tumblr.com/tagged/mommy/rss",
+]
 MASTODON_INSTANCES = ["mastodon.social", "fosstodon.org"]
 MASTODON_TAGS = ["mother", "mama", "mommy"]
 RSS_FEEDS = [
@@ -194,20 +198,19 @@ def scrape_tumblr():
     existing = load_file("tumblr")
     new_items = []
 
-    for tag in TUMBLR_TAGS:
-        try:
-            url = f"https://{tag}.tumblr.com/rss"
-            feed = feedparser.parse(url)
-            for entry in feed.entries[:20]:
-                text = entry.get("summary", "") or entry.get("title", "")
-                text = re.sub(r'<[^>]+>', '', text)
-                text = re.sub(r'http\S+', '', text).strip()
-                for s in split_sentences(text):
-                    if has_keyword(s):
-                        new_items.append(make_entry(s, "tumblr", tag))
-            print(f"  [{tag}]: done")
-        except Exception as e:
-            print(f"  [{tag}] error: {e}")
+    for tag_url in TUMBLR_TAGS:
+    try:
+        feed = feedparser.parse(tag_url)
+        for entry in feed.entries[:20]:
+            text = entry.get("summary", "") or entry.get("title", "")
+            text = re.sub(r'<[^>]+>', '', text)
+            text = re.sub(r'http\S+', '', text).strip()
+            for s in split_sentences(text):
+                if has_keyword(s):
+                    new_items.append(make_entry(s, "tumblr", tag_url))
+        print(f"  [{tag_url}]: done")
+    except Exception as e:
+        print(f"  [{tag_url}] error: {e}")
 
     merged, added = merge_new(existing, new_items, blocklist)
     save_file("tumblr", merged)
