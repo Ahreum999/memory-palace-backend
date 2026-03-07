@@ -6,6 +6,7 @@ import feedparser
 import json
 import re
 import os
+import psycopg2
 from datetime import datetime, date
 from dotenv import load_dotenv
 
@@ -14,82 +15,148 @@ load_dotenv(os.path.join(os.path.dirname(__file__), "../.env"))
 # ── KEYWORDS ─────────────────────────────────────────────────
 KEYWORDS = ["mama", "mother", "mommy"]
 
-# ── FILE PATHS ───────────────────────────────────────────────
+# ── DATABASE ─────────────────────────────────────────────────
+def get_db():
+    return psycopg2.connect(
+        os.environ.get("DATABASE_URL"),
+        sslmode="require"
+    )
+
+def init_db():
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS sentences (
+            id SERIAL PRIMARY KEY,
+            text TEXT NOT NULL UNIQUE,
+            source VARCHAR(50),
+            extra TEXT,
+            image TEXT,
+            added DATE DEFAULT CURRENT_DATE
+        )
+    """)
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS scrape_stamps (
+            source VARCHAR(50) PRIMARY KEY,
+            last_scraped DATE
+        )
+    """)
+    conn.commit()
+    cur.close()
+    conn.close()
+    print("Database ready")
+
+def save_to_db(new_items, blocklist):
+    conn = get_db()
+    cur = conn.cursor()
+    added = 0
+    blocked = 0
+    duplicates = 0
+
+    for item in new_items:
+        if not is_clean(item["text"], blocklist):
+            blocked += 1
+            continue
+        try:
+            cur.execute(
+                """INSERT INTO sentences (text, source, extra, image, added)
+                   VALUES (%s, %s, %s, %s, %s)
+                   ON CONFLICT (text) DO NOTHING""",
+                [
+                    item["text"],
+                    item["source"],
+                    item.get("extra", ""),
+                    item.get("image", None),
+                    item.get("added", str(date.today()))
+                ]
+            )
+            if cur.rowcount > 0:
+                added += 1
+            else:
+                duplicates += 1
+        except Exception as e:
+            print(f"  DB insert error: {e}")
+
+    conn.commit()
+    cur.close()
+    conn.close()
+    print(f"  [+] added: {added}  [=] duplicates: {duplicates}  [x] blocked: {blocked}")
+    return added
+
+def get_count(source):
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("SELECT COUNT(*) FROM sentences WHERE source = %s", [source])
+    count = cur.fetchone()[0]
+    cur.close()
+    conn.close()
+    return count
+
+def get_total():
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("SELECT source, COUNT(*) FROM sentences GROUP BY source")
+    rows = cur.fetchall()
+    cur.close()
+    conn.close()
+    return rows
+
+def already_scraped_today(source):
+    try:
+        conn = get_db()
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT last_scraped FROM scrape_stamps WHERE source = %s",
+            [source]
+        )
+        row = cur.fetchone()
+        cur.close()
+        conn.close()
+        if row:
+            return str(row[0]) == str(date.today())
+        return False
+    except:
+        return False
+
+def mark_scraped_today(source):
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute(
+        """INSERT INTO scrape_stamps (source, last_scraped)
+           VALUES (%s, %s)
+           ON CONFLICT (source) DO UPDATE SET last_scraped = %s""",
+        [source, str(date.today()), str(date.today())]
+    )
+    conn.commit()
+    cur.close()
+    conn.close()
+
+# ── BLOCKLIST ────────────────────────────────────────────────
 DATA_DIR = os.path.join(os.path.dirname(__file__), "../data")
-
-FILES = {
-    "wikipedia":  os.path.join(DATA_DIR, "wikipedia.json"),
-    "reddit":     os.path.join(DATA_DIR, "reddit.json"),
-    "bluesky":    os.path.join(DATA_DIR, "bluesky.json"),
-    "tumblr":     os.path.join(DATA_DIR, "tumblr.json"),
-    "mastodon":   os.path.join(DATA_DIR, "mastodon.json"),
-    "newspapers": os.path.join(DATA_DIR, "newspapers.json"),
-}
-
-# Daily stamp files
-STAMPS = {
-    "wikipedia": os.path.join(DATA_DIR, "wiki_last_scraped.txt"),
-    "tumblr":    os.path.join(DATA_DIR, "tumblr_last_scraped.txt"),
-}
-
-MAX = {
-    "wikipedia":  8000,
-    "reddit":     8000,
-    "bluesky":    8000,
-    "tumblr":     8000,
-    "mastodon":   8000,
-    "newspapers": 8000,
-}
-
 BLOCKLIST_FILE = os.path.join(DATA_DIR, "blocklist.txt")
-TUMBLR_TAGS = [
-    "https://www.tumblr.com/tagged/mother/rss",
-    "https://www.tumblr.com/tagged/mama/rss",
-    "https://www.tumblr.com/tagged/mommy/rss",
-]
-MASTODON_INSTANCES = ["mastodon.social", "fosstodon.org"]
-MASTODON_TAGS = ["mother", "mama", "mommy"]
-RSS_FEEDS = [
-    "https://www.theguardian.com/world/rss",
-    "https://feeds.bbci.co.uk/news/world/rss.xml",
-    "https://feeds.npr.org/1001/rss.xml",
-    "https://www.lemonde.fr/rss/une.xml",
-    "https://rsshub.app/apnews/topics/apf-topnews",
-]
-WIKIPEDIA_PAGES = [
-    "Mother", "Motherhood", "Mother_goddess",
-    "Queen_Mother_of_the_West", "Demeter", "Isis",
-    "Memory", "Oral_tradition", "Mourning",
-    "Matriarchy", "Womb", "Childbirth",
-    "Breastfeeding", "Lullaby", "Grief"
-]
-NEWS_KEYWORDS = [
-    "mother", "mama", "mom ", "child", "family",
-    "daughter", "son", "parent", "birth", "baby",
-    "infant", "woman", "maternity"
-]
 
-# ── HELPERS ──────────────────────────────────────────────────
 def load_blocklist():
-    """Load blocked words from blocklist.txt."""
     try:
         with open(BLOCKLIST_FILE, "r", encoding="utf-8") as f:
-            return [
-                line.strip().lower()
-                for line in f.readlines()
-                if line.strip()
-            ]
+            return [line.strip().lower() for line in f if line.strip()]
     except:
-        return []
+        return [
+            "motherfucker", "motherfucking", "porn", "rape",
+            "kill yourself", "bdsm", "kink", "ddlg", "daddy",
+            "littlegirl", "abdl", "domina", "femdom", "milf",
+            "nsfw", "mommy milkers", "mommydom", "inzest",
+            "soumise", "tetine", "nude", "naked", "sex"
+        ]
 
-
+# ── HELPERS ──────────────────────────────────────────────────
 def split_sentences(text):
     text = re.sub(r'\s+', ' ', text).strip()
-    # Remove lines that are mostly hashtags
+    # Skip if mostly hashtags
     words = text.split()
-    hashtag_count = sum(1 for w in words if w.startswith('#'))
-    if len(words) > 0 and hashtag_count / len(words) > 0.4:
-        return []  # skip if more than 40% hashtags
+    if len(words) > 0:
+        hashtag_count = sum(1 for w in words if w.startswith('#'))
+        if hashtag_count / len(words) > 0.4:
+            return []
     sentences = re.split(r'(?<=[.!?])\s+', text)
     return [s.strip() for s in sentences if len(s) > 20]
 
@@ -101,68 +168,51 @@ def has_keyword(text):
     lower = text.lower()
     return any(kw in lower for kw in KEYWORDS)
 
-def make_entry(text, source, extra=""):
+def make_entry(text, source, extra="", image=None):
     return {
         "text": text,
         "source": source,
         "extra": extra,
+        "image": image,
         "added": str(date.today())
     }
 
-def load_file(source):
-    try:
-        with open(FILES[source], "r", encoding="utf-8") as f:
-            return json.load(f)
-    except:
-        return []
+# ── WIKIPEDIA PAGES ──────────────────────────────────────────
+WIKIPEDIA_PAGES = [
+    "Mother", "Motherhood", "Mother_goddess",
+    "Queen_Mother_of_the_West", "Demeter", "Isis",
+    "Memory", "Oral_tradition", "Mourning",
+    "Matriarchy", "Womb", "Childbirth",
+    "Breastfeeding", "Lullaby", "Grief"
+]
 
-def save_file(source, sentences):
-    os.makedirs(DATA_DIR, exist_ok=True)
-    if len(sentences) > MAX[source]:
-        sentences = sentences[-MAX[source]:]
-    with open(FILES[source], "w", encoding="utf-8") as f:
-        json.dump(sentences, f, ensure_ascii=False, indent=2)
-    print(f"  [saved] {source}: {len(sentences)} total sentences")
+# ── RSS FEEDS ────────────────────────────────────────────────
+RSS_FEEDS = [
+    "https://www.theguardian.com/world/rss",
+    "https://feeds.bbci.co.uk/news/world/rss.xml",
+    "https://feeds.npr.org/1001/rss.xml",
+    "https://www.lemonde.fr/rss/une.xml",
+    "https://rsshub.app/apnews/topics/apf-topnews",
+]
 
-def merge_new(existing, new_items, blocklist):
-    """Add new items, skip duplicates and blocked sentences."""
-    existing_texts = {s["text"] for s in existing}
-    added = 0
-    blocked = 0
-    skipped = 0
-    for item in new_items:
-        if item["text"] in existing_texts:
-            skipped += 1
-        elif not is_clean(item["text"], blocklist):
-            blocked += 1
-        else:
-            existing.append(item)
-            existing_texts.add(item["text"])
-            added += 1
-    print(f"  [+] added: {added}  [=] duplicates: {skipped}  [x] blocked: {blocked}")
-    return existing, added
+TUMBLR_TAGS = [
+    "https://www.tumblr.com/tagged/mother/rss",
+    "https://www.tumblr.com/tagged/mama/rss",
+    "https://www.tumblr.com/tagged/mommy/rss",
+]
 
-def already_scraped_today(source):
-    try:
-        with open(STAMPS[source], "r") as f:
-            return f.read().strip() == str(date.today())
-    except:
-        return False
+MASTODON_INSTANCES = ["mastodon.social", "fosstodon.org"]
+MASTODON_TAGS = ["mother", "mama", "mommy"]
 
-def mark_scraped_today(source):
-    with open(STAMPS[source], "w") as f:
-        f.write(str(date.today()))
 
-# ── WIKIPEDIA (daily) ────────────────────────────────────────
+# ── SCRAPERS ─────────────────────────────────────────────────
 def scrape_wikipedia():
     print("\nWikipedia (daily)...")
     if already_scraped_today("wikipedia"):
-        count = len(load_file("wikipedia"))
-        print(f"  Already scraped today. Current: {count} sentences")
+        print(f"  Already scraped today. Current: {get_count('wikipedia')} sentences")
         return
 
     blocklist = load_blocklist()
-    existing = load_file("wikipedia")
     new_items = []
 
     for page in WIKIPEDIA_PAGES:
@@ -181,21 +231,17 @@ def scrape_wikipedia():
         except Exception as e:
             print(f"  [{page}] error: {e}")
 
-    merged, added = merge_new(existing, new_items, blocklist)
-    save_file("wikipedia", merged)
+    save_to_db(new_items, blocklist)
     mark_scraped_today("wikipedia")
 
 
-# ── TUMBLR (daily) ───────────────────────────────────────────
 def scrape_tumblr():
     print("\nTumblr (daily)...")
     if already_scraped_today("tumblr"):
-        count = len(load_file("tumblr"))
-        print(f"  Already scraped today. Current: {count} sentences")
+        print(f"  Already scraped today. Current: {get_count('tumblr')} sentences")
         return
 
     blocklist = load_blocklist()
-    existing = load_file("tumblr")
     new_items = []
 
     for tag_url in TUMBLR_TAGS:
@@ -212,12 +258,10 @@ def scrape_tumblr():
         except Exception as e:
             print(f"  [{tag_url}] error: {e}")
 
-    merged, added = merge_new(existing, new_items, blocklist)
-    save_file("tumblr", merged)
+    save_to_db(new_items, blocklist)
     mark_scraped_today("tumblr")
 
 
-# ── BLUESKY (hourly) ─────────────────────────────────────────
 def get_bluesky_token():
     username = os.environ.get("BSKY_USERNAME")
     password = os.environ.get("BSKY_APP_PASSWORD")
@@ -239,12 +283,11 @@ def get_bluesky_token():
 def scrape_bluesky():
     print("\nBluesky (hourly)...")
     blocklist = load_blocklist()
-    existing = load_file("bluesky")
     new_items = []
 
     token = get_bluesky_token()
     if not token:
-        print("  Skipping — no token")
+        print("  Skipping -- no token")
         return
 
     headers = {
@@ -271,15 +314,12 @@ def scrape_bluesky():
         except Exception as e:
             print(f"  [{keyword}] error: {e}")
 
-    merged, added = merge_new(existing, new_items, blocklist)
-    save_file("bluesky", merged)
+    save_to_db(new_items, blocklist)
 
 
-# ── MASTODON (hourly) ────────────────────────────────────────
 def scrape_mastodon():
     print("\nMastodon (hourly)...")
     blocklist = load_blocklist()
-    existing = load_file("mastodon")
     new_items = []
 
     for instance in MASTODON_INSTANCES:
@@ -293,33 +333,27 @@ def scrape_mastodon():
                     text = re.sub(r'http\S+', '', text).strip()
                     text = re.sub(r'@\S+', '', text).strip()
 
-                    # Get image if post has one
                     image_url = None
-                    attachments = post.get("media_attachments", [])
-                    for att in attachments:
+                    for att in post.get("media_attachments", []):
                         if att.get("type") == "image":
                             image_url = att.get("url")
                             break
 
                     for s in split_sentences(text):
                         if has_keyword(s):
-                            entry = make_entry(s, "mastodon", tag)
-                            if image_url:
-                                entry["image"] = image_url
-                            new_items.append(entry)
+                            new_items.append(
+                                make_entry(s, "mastodon", tag, image_url)
+                            )
                 print(f"  [{instance}/#{tag}]: done")
             except Exception as e:
                 print(f"  [{instance}/#{tag}] error: {e}")
 
-    merged, added = merge_new(existing, new_items, blocklist)
-    save_file("mastodon", merged)
+    save_to_db(new_items, blocklist)
 
 
-# ── REDDIT (hourly) ──────────────────────────────────────────
 def scrape_reddit():
     print("\nReddit (hourly)...")
     blocklist = load_blocklist()
-    existing = load_file("reddit")
     new_items = []
     headers = {"User-Agent": "memory-palace-bot/1.0"}
 
@@ -333,7 +367,6 @@ def scrape_reddit():
             for post in posts:
                 pd = post.get("data", {})
 
-                # Get image if post has one
                 image_url = None
                 preview = pd.get("preview", {})
                 images = preview.get("images", [])
@@ -344,23 +377,19 @@ def scrape_reddit():
                 for text in [pd.get("title", ""), pd.get("selftext", "")]:
                     for s in split_sentences(text):
                         if has_keyword(s):
-                            entry = make_entry(s, "reddit", term)
-                            if image_url:
-                                entry["image"] = image_url
-                            new_items.append(entry)
+                            new_items.append(
+                                make_entry(s, "reddit", term, image_url)
+                            )
             print(f"  [{term}]: {len(posts)} posts checked")
         except Exception as e:
             print(f"  [{term}] error: {e}")
 
-    merged, added = merge_new(existing, new_items, blocklist)
-    save_file("reddit", merged)
+    save_to_db(new_items, blocklist)
 
 
-# ── NEWSPAPERS (hourly) ──────────────────────────────────────
 def scrape_newspapers():
     print("\nNewspapers (hourly)...")
     blocklist = load_blocklist()
-    existing = load_file("newspapers")
     new_items = []
 
     for feed_url in RSS_FEEDS:
@@ -371,34 +400,33 @@ def scrape_newspapers():
                 text = re.sub(r'<[^>]+>', '', text)
                 text = re.sub(r'http\S+', '', text).strip()
 
-                # Try to get article image
                 image_url = None
                 media = entry.get("media_content", [])
                 if media:
                     image_url = media[0].get("url")
                 if not image_url:
-                    enclosures = entry.get("enclosures", [])
-                    for enc in enclosures:
+                    for enc in entry.get("enclosures", []):
                         if "image" in enc.get("type", ""):
                             image_url = enc.get("href")
                             break
 
                 for s in split_sentences(text):
                     if is_clean(s, blocklist) and has_keyword(s):
-                        entry_data = make_entry(s, "newspapers", feed_url)
-                        if image_url:
-                            entry_data["image"] = image_url
-                        new_items.append(entry_data)
+                        new_items.append(
+                            make_entry(s, "newspapers", feed_url, image_url)
+                        )
             print(f"  [{feed_url[:50]}]: done")
         except Exception as e:
             print(f"  [{feed_url[:50]}] error: {e}")
 
-    merged, added = merge_new(existing, new_items, blocklist)
-    save_file("newspapers", merged)
+    save_to_db(new_items, blocklist)
+
 
 # ── MAIN ─────────────────────────────────────────────────────
 def main():
     print(f"Scraping started -- {datetime.now().strftime('%Y-%m-%d %H:%M')}")
+
+    init_db()
 
     scrape_wikipedia()
     scrape_tumblr()
@@ -408,19 +436,14 @@ def main():
     scrape_newspapers()
 
     print("\nCurrent totals:")
+    rows = get_total()
     grand_total = 0
-    for source, filepath in FILES.items():
-        try:
-            with open(filepath, "r", encoding="utf-8") as f:
-                count = len(json.load(f))
-                grand_total += count
-                needed = max(0, 7000 - grand_total)
-                print(f"  {source}: {count}")
-        except:
-            print(f"  {source}: 0")
+    for source, count in rows:
+        print(f"  {source}: {count}")
+        grand_total += count
     print(f"  TOTAL: {grand_total} / 7000 needed")
     if grand_total < 7000:
-        print(f"  NEED {7000 - grand_total} more sentences for full gallery day")
+        print(f"  NEED {7000 - grand_total} more sentences")
     else:
         print(f"  Ready for gallery!")
 
