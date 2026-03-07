@@ -199,18 +199,18 @@ def scrape_tumblr():
     new_items = []
 
     for tag_url in TUMBLR_TAGS:
-    try:
-        feed = feedparser.parse(tag_url)
-        for entry in feed.entries[:20]:
-            text = entry.get("summary", "") or entry.get("title", "")
-            text = re.sub(r'<[^>]+>', '', text)
-            text = re.sub(r'http\S+', '', text).strip()
-            for s in split_sentences(text):
-                if has_keyword(s):
-                    new_items.append(make_entry(s, "tumblr", tag_url))
-        print(f"  [{tag_url}]: done")
-    except Exception as e:
-        print(f"  [{tag_url}] error: {e}")
+        try:
+            feed = feedparser.parse(tag_url)
+            for entry in feed.entries[:20]:
+                text = entry.get("summary", "") or entry.get("title", "")
+                text = re.sub(r'<[^>]+>', '', text)
+                text = re.sub(r'http\S+', '', text).strip()
+                for s in split_sentences(text):
+                    if has_keyword(s):
+                        new_items.append(make_entry(s, "tumblr", tag_url))
+            print(f"  [{tag_url}]: done")
+        except Exception as e:
+            print(f"  [{tag_url}] error: {e}")
 
     merged, added = merge_new(existing, new_items, blocklist)
     save_file("tumblr", merged)
