@@ -12,15 +12,21 @@ from dotenv import load_dotenv
 
 load_dotenv(os.path.join(os.path.dirname(__file__), "../.env"))
 
+
+db_url = os.environ.get("DATABASE_URL")
+print(f"DATABASE_URL found: {bool(db_url)}")
+if db_url:
+    print(f"  starts with: {db_url[:20]}...")
+    
 # ── KEYWORDS ─────────────────────────────────────────────────
 KEYWORDS = ["mama", "mother", "mommy"]
 
 # ── DATABASE ─────────────────────────────────────────────────
 def get_db():
-    return psycopg2.connect(
-        os.environ.get("DATABASE_URL"),
-        sslmode="require"
-    )
+    db_url = os.environ.get("DATABASE_URL")
+    if not db_url:
+        raise Exception("DATABASE_URL not set!")
+    return psycopg2.connect(db_url, sslmode="require")
 
 def init_db():
     conn = get_db()
@@ -424,7 +430,7 @@ def scrape_newspapers():
 
 # ── MAIN ─────────────────────────────────────────────────────
 def main():
-    print(f"Scraping started -- {datetime.now().strftime('%Y-%m-%d %H:%M')}")
+    print(f"DATABASE_URL exists: {bool(os.environ.get('DATABASE_URL'))}")
 
     init_db()
 
