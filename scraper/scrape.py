@@ -12,14 +12,13 @@ from dotenv import load_dotenv
 
 load_dotenv(os.path.join(os.path.dirname(__file__), "../.env"))
 
-# Get DATABASE_URL from command line argument OR environment
-if len(sys.argv) > 1 and sys.argv[1]:
+# Get DATABASE_URL from argument, environment, or hardcoded fallback
+if len(sys.argv) > 1 and sys.argv[1] and sys.argv[1] != '""':
     DATABASE_URL = sys.argv[1]
-    print(f"Using DATABASE_URL from argument")
+    print("Using DATABASE_URL from argument")
 else:
-    DATABASE_URL = os.environ.get("DATABASE_URL")
-    print(f"Using DATABASE_URL from environment: {bool(DATABASE_URL)}")
-    
+    DATABASE_URL = os.environ.get("DATABASE_URL") or "postgresql://postgres:YqPFZxFQtNzOMREvzqLuNInEHSjhORbY@maglev.proxy.rlwy.net:44365/railway"
+    print(f"Using DATABASE_URL from environment/fallback: {bool(DATABASE_URL)}")
     
 # ── KEYWORDS ─────────────────────────────────────────────────
 KEYWORDS = ["mama", "mother", "mommy"]
