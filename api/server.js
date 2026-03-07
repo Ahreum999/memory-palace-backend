@@ -70,7 +70,22 @@ app.get('/health', (req, res) => res.json({ status: 'ok' }));
 // ── SCRAPER RUNNER ───────────────────────────────────────────
 function runScraper() {
   const scraperPath = path.join(__dirname, '../scraper/scrape.py');
-  console.log(`🔍 Running scraper — ${new Date().toISOString()}`);
+  console.log(`Running scraper — ${new Date().toISOString()}`);
+  
+  exec(`python3 ${scraperPath}`, {
+    env: {
+      ...process.env,
+      DATABASE_URL: process.env.DATABASE_URL
+    }
+  }, (error, stdout, stderr) => {
+    if (error) {
+      console.error(`Scraper error: ${error.message}`);
+      return;
+    }
+    if (stderr) console.error(`Scraper stderr: ${stderr}`);
+    console.log(`Scraper output:\n${stdout}`);
+  });
+}
 
 exec(`python3 ${scraperPath}`, (error, stdout, stderr) => {
     if (error) {
