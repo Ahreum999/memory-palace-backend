@@ -4,7 +4,7 @@ nixPkgs = ["python311", "nodejs_20"]
 [phases.install]
 cmds = [
   "npm install",
-  "pip install requests feedparser beautifulsoup4 python-dotenv"
+  "python3 -m pip install requests feedparser beautifulsoup4 python-dotenv"
 ]
 
 [start]

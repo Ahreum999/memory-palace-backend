@@ -71,7 +71,7 @@ function runScraper() {
   const scraperPath = path.join(__dirname, '../scraper/scrape.py');
   console.log(`🔍 Running scraper — ${new Date().toISOString()}`);
 
-  exec(`python ${scraperPath}`, (error, stdout, stderr) => {
+exec(`python3 ${scraperPath}`, (error, stdout, stderr) => {
     if (error) {
       console.error(`Scraper error: ${error.message}`);
       return;
