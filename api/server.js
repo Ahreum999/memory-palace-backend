@@ -39,13 +39,12 @@ app.get('/stats', async (req, res) => {
 
 function runScraper() {
   const scraperPath = path.join(__dirname, '../scraper/scrape.py');
+  const dbUrl = process.env.DATABASE_URL || '';
   console.log(`Running scraper — ${new Date().toISOString()}`);
+  console.log(`Passing DB URL: ${dbUrl ? 'YES' : 'NO'}`);
 
-  exec(`python3 ${scraperPath}`, {
-    env: {
-      ...process.env,
-      DATABASE_URL: process.env.DATABASE_URL
-    }
+  exec(`python3 ${scraperPath} "${dbUrl}"`, {
+    env: { ...process.env }
   }, (error, stdout, stderr) => {
     if (error) {
       console.error(`Scraper error: ${error.message}`);

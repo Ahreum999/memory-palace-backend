@@ -12,21 +12,23 @@ from dotenv import load_dotenv
 
 load_dotenv(os.path.join(os.path.dirname(__file__), "../.env"))
 
-
-db_url = os.environ.get("DATABASE_URL")
-print(f"DATABASE_URL found: {bool(db_url)}")
-if db_url:
-    print(f"  starts with: {db_url[:20]}...")
+# Get DATABASE_URL from command line argument OR environment
+if len(sys.argv) > 1 and sys.argv[1]:
+    DATABASE_URL = sys.argv[1]
+    print(f"Using DATABASE_URL from argument")
+else:
+    DATABASE_URL = os.environ.get("DATABASE_URL")
+    print(f"Using DATABASE_URL from environment: {bool(DATABASE_URL)}")
+    
     
 # ── KEYWORDS ─────────────────────────────────────────────────
 KEYWORDS = ["mama", "mother", "mommy"]
 
 # ── DATABASE ─────────────────────────────────────────────────
 def get_db():
-    db_url = os.environ.get("DATABASE_URL")
-    if not db_url:
+    if not DATABASE_URL:
         raise Exception("DATABASE_URL not set!")
-    return psycopg2.connect(db_url, sslmode="require")
+    return psycopg2.connect(DATABASE_URL, sslmode="require")
 
 def init_db():
     conn = get_db()
