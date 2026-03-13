@@ -181,7 +181,7 @@ def make_entry(text, source, extra="", image=None):
         "source": source,
         "extra": extra,
         "image": image,
-        "added": str(date.today())
+        "added": datetime.utcnow().isoformat()
     }
 
 # ── WIKIPEDIA PAGES ──────────────────────────────────────────

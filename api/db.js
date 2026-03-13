@@ -21,6 +21,19 @@ async function initDB() {
       added DATE DEFAULT CURRENT_DATE
     )
   `);
+
+  // Migrate: change added from DATE to TIMESTAMP if needed
+  const colCheck = await pool.query(`
+    SELECT data_type FROM information_schema.columns
+    WHERE table_name = 'sentences' AND column_name = 'added'
+  `);
+  if (colCheck.rows.length > 0 && colCheck.rows[0].data_type === 'date') {
+    console.log('Migrating added column from DATE to TIMESTAMP...');
+    await pool.query(`ALTER TABLE sentences ALTER COLUMN added TYPE TIMESTAMP USING added::timestamp`);
+    await pool.query(`ALTER TABLE sentences ALTER COLUMN added SET DEFAULT NOW()`);
+    console.log('Migration complete');
+  }
+
   const count = await pool.query('SELECT COUNT(*) FROM sentences');
   console.log(`Database ready — ${count.rows[0].count} sentences`);
 }
@@ -33,7 +46,7 @@ async function saveSentences(sentences) {
         `INSERT INTO sentences (text, source, extra, image, added)
          VALUES ($1, $2, $3, $4, $5)
          ON CONFLICT (text) DO NOTHING`,
-        [s.text, s.source, s.extra || '', s.image || null, s.added || new Date().toISOString().split('T')[0]]
+        [s.text, s.source, s.extra || '', s.image || null, s.added || new Date().toISOString()]
       );
       added++;
     } catch (err) {
@@ -97,7 +110,7 @@ async function deleteSentencesById(ids) {
   return result.rowCount;
 }
 
-// Full export (for manual /archive/export endpoint)
+// Full export
 async function getAllSentences() {
   const result = await pool.query(
     `SELECT id, text, source, extra, image, added
