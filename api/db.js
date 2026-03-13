@@ -16,7 +16,8 @@ async function initDB() {
       added DATE DEFAULT CURRENT_DATE
     )
   `);
-  console.log('Database ready');
+  const count = await pool.query('SELECT COUNT(*) FROM sentences');
+  console.log(`Database ready — ${count.rows[0].count} sentences`);
 }
 
 async function saveSentences(sentences) {
@@ -37,10 +38,12 @@ async function saveSentences(sentences) {
   return added;
 }
 
+// Feed: newest sentences first (most recently added to DB)
 async function getSentences(limit = 500) {
   const result = await pool.query(
-    `SELECT text, source, extra, image FROM sentences 
-     ORDER BY RANDOM() LIMIT $1`,
+    `SELECT text, source, extra, image, added FROM sentences
+     ORDER BY id DESC
+     LIMIT $1`,
     [limit]
   );
   return result.rows;
@@ -48,17 +51,28 @@ async function getSentences(limit = 500) {
 
 async function getStats() {
   const result = await pool.query(
-    `SELECT source, COUNT(*) as count 
-     FROM sentences 
+    `SELECT source, COUNT(*)::int as count
+     FROM sentences
      GROUP BY source`
   );
   const stats = {};
   let total = 0;
   for (const row of result.rows) {
-    stats[row.source] = parseInt(row.count);
-    total += parseInt(row.count);
+    stats[row.source] = row.count;
+    total += row.count;
   }
-  return { stats, total };
+  stats.total = total;
+  return stats;
 }
 
-module.exports = { initDB, saveSentences, getSentences, getStats };
+// Full export sorted by date (newest first)
+async function getAllSentences() {
+  const result = await pool.query(
+    `SELECT id, text, source, extra, image, added
+     FROM sentences
+     ORDER BY id DESC`
+  );
+  return result.rows;
+}
+
+module.exports = { initDB, saveSentences, getSentences, getStats, getAllSentences };
